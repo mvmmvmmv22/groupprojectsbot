@@ -18,7 +18,6 @@ logging.basicConfig(
 )
 
 logging.getLogger('aiogram').setLevel(logging.INFO)
-logging.getLogger('asyncpg').setLevel(logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 

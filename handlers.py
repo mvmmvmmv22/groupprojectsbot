@@ -5,11 +5,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime
 import logging
+from db import Database
 from keyboards import (
     get_main_kb,
     get_project_actions_kb,
     get_cancel_kb,
-    get_confirm_deletion_kb
+    get_confirm_deletion_kb,
+    get_notifications_kb
 )
 
 logger = logging.getLogger(__name__)
@@ -310,3 +312,63 @@ async def process_deadline_input(message: Message, state: FSMContext):
         await message.answer("Произошла ошибка. Попробуйте снова.")
         await state.clear()
 
+# Обработка установки времени между уведомлениями
+@router.callback_query(F.data.startswith("set_hours_"))
+async def set_reminder_hours(callback: CallbackQuery, state: FSMContext):
+    hours_str = callback.data.split("_")[-1]  # например, "24_6_1"
+    hours = list(map(int, hours_str.split("-")))
+    await update_notification_settings(callback.from_user.id, hours=hours)
+    await callback.answer(f"Напоминания будут приходить за {', '.join(map(str, hours))} часов")
+    await notification_settings(callback.message, None)
+
+
+# Обработка вызова ручной проверки уведомлений
+@router.message(F.text == "Проверить уведомления")
+async def check_notifications(message: Message):
+    user_id = message.from_user.id
+    projects = await db.fetch(
+        "SELECT * FROM projects WHERE creator_id = $1 AND next_notification <= NOW()",
+        user_id
+    )
+    for project in projects:
+        deadline = project["deadline"]
+        hours_left = (deadline - datetime.now()).total_seconds() // 3600
+        await message.answer(
+            f"⚠️ Напоминание! Проект «{project['title']}»\n"
+            f"Дедлайн через {int(hours_left)} часов!",
+            reply_markup=get_project_actions_kb(project["id"])
+        )
+        await schedule_next_notification(project["id"])
+
+
+# Обработка вызова настроек уведомлений
+@router.message(F.text == "Настройки уведомлений")
+async def show_notifications(message: Message, db: db):
+    try:
+        settings = await db.get_notification_settings(message.from_user.id)
+        if not settings:
+            await db.update_notification_settings(message.from_user.id, True, [24, 6, 1])
+            settings = {"enable_reminders": True, "reminder_hours": [24, 6, 1]}
+        await message.answer(
+            f"Включены: {settings['enable_reminders']}\n"
+            f"Интервалы: {settings['reminder_hours']}",
+            reply_markup=get_notifications_kb()
+        )
+        logger.info("Меню настроек отправлено user_id=%d", message.from_user.id)
+    except Exception as e:
+        logger.error(f"Ошибка в show_notifications: {e}")
+        await message.answer("Произошла ошибка. Попробуйте снова.")
+        await state.clear()
+
+
+# Обработка переключения уведомлений(режим "Не беспокоить")
+@router.callback_query(F.data.startswith("reminder_"))
+async def handle_reminder(callback: CallbackQuery, db: Database):
+    action, value = callback.data.split("_")
+    user_id = callback.from_user.id
+
+    if action == "toggle":
+        new_state = value == "on"
+        await db.update_notification_settings(user_id, enable=new_state)
+        await callback.answer(f"Уведомления {'включены' if new_state else 'отключены'}")
+        logger.info("Уведомления %s для user_id=%d", "включены" if new_state else "отключены", user_id)

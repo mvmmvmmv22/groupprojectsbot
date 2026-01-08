@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import os
 from db import Database
 from handlers import router
+from logger import *
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +32,28 @@ if not BOT_TOKEN:
 if not DB_DSN:
     raise ValueError("Переменная DB_DSN не найдена в .env")
 
+
+async def check_deadlines(bot: Bot, db: Database):
+    logger.info("Фоновый таск запущен")
+    while True:
+        try:
+            projects = await db.get_projects_near_deadline()
+            for p in projects:
+                hours_left = (p["deadline"] - datetime.utcnow()).total_seconds() // 3600
+                try:
+                    await bot.send_message(
+                        p["creator_id"],
+                        f"⚠️ Проект «{p['title']}»: дедлайн через {int(hours_left)} ч."
+                    )
+                    await db.set_last_notification(p["id"], datetime.utcnow())
+                    logger.info("Уведомление отправлено project_id=%d, user_id=%d", p["id"], p["creator_id"])
+                except Exception as e:
+                    logger.error("Не удалось отправить user_id=%d: %s", p["creator_id"], e)
+        except Exception as e:
+            logger.error("Ошибка фонового таска: %s", e)
+        await asyncio.sleep(1800)
+
+
 async def main():
     db = Database(DB_DSN)
     try:
@@ -52,7 +75,7 @@ async def main():
     dp.include_router(router)
 
     logger.info(f"Запуск бота...")
-
+    asyncio.create_task(check_deadlines(bot, db))
     try:
         await dp.start_polling(bot, skip_updates=True)
     except Exception as e:

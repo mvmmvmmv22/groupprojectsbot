@@ -95,7 +95,7 @@ def get_reminder_kb():
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_notification_settings_keyboard():
+def get_notification_settings_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(

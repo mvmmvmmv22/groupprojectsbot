@@ -121,28 +121,66 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка: {e}")
             raise
+
+
     async def get_notification_settings(self, user_id: int) -> dict | None:
         try:
-            result = await self.fetchrow(
+            result = await self.fetch(
                 "SELECT enable_reminders, reminder_hours FROM notifications_settings WHERE user_id = $1",
                 user_id
             )
-            logger.info("Настройки для user_id=%d: %s", user_id, result)
-            return result
+            if result:
+                row = result[0]  # Берём первую запись
+                return {
+                    "enable_reminders": row["enable_reminders"],
+                    "reminder_hours": row["reminder_hours"]
+                }
+            return None
         except Exception as e:
             logger.error("Ошибка получения настроек user_id=%d: %s", user_id, e)
             return None
 
-    async def update_notification_settings(self, user_id: int, enable: bool = None, hours: list[int] = None):
+
+    async def update_notification_settings(
+        self,
+        user_id: int,
+        enable_reminders: bool | None = None,
+        reminder_hours: list[int] | None = None
+    ):
         try:
-            if enable is not None:
-                await self.execute("UPDATE notifications_settings SET enable_reminders = $1 WHERE user_id = $2", enable, user_id)
-                logger.info("enable_reminders=%s для user_id=%d", enable, user_id)
-            if hours is not None:
-                await self.execute("UPDATE notifications_settings SET reminder_hours = $1 WHERE user_id = $2", hours, user_id)
-                logger.info("reminder_hours=%s для user_id=%d", hours, user_id)
+            # Валидация входных данных
+            if reminder_hours is not None:
+                if not reminder_hours:
+                    raise ValueError("Список интервалов не может быть пустым")
+                if not all(isinstance(h, int) and h > 0 for h in reminder_hours):
+                    raise ValueError("Все интервалы должны быть положительными целыми числами")
+
+            # Формируем запрос
+            query = """
+                INSERT INTO notifications_settings (user_id, enable_reminders, reminder_hours)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id) DO UPDATE
+                SET
+                    enable_reminders = CASE
+                        WHEN $2 IS NULL THEN notifications_settings.enable_reminders
+                        ELSE $2
+                    END,
+                    reminder_hours = CASE
+                        WHEN $3 IS NULL THEN notifications_settings.reminder_hours
+                        ELSE $3
+                    END
+            """
+
+            # Выполняем запрос
+            await self.execute(query, user_id, enable_reminders, reminder_hours)
+
+            logger.info("Настройки сохранены для user_id=%d: enable=%s, hours=%s",
+                        user_id, enable_reminders, reminder_hours)
+
         except Exception as e:
-            logger.error("Ошибка обновления настроек user_id=%d: %s", user_id, e)
+            logger.error("Ошибка сохранения настроек user_id=%d: %s", user_id, e)
+            raise  # Перебрасываем исключение для обработки в хендлере
+
 
     async def get_projects_near_deadline(self) -> list[dict]:
         try:
@@ -155,14 +193,17 @@ class Database:
                 ns.reminder_hours
             FROM projects p
             JOIN notifications_settings ns ON p.creator_id = ns.user_id
-            JOIN UNNEST(ns.reminder_hours) AS reminder_hour ON TRUE
+            JOIN UNNEST(ns.reminder_hours) AS rh ON TRUE
             WHERE
                 p.deadline BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
                 AND ns.enable_reminders = TRUE
                 AND (
                     p.last_notification_sent IS NULL
-                    OR p.last_notification_sent < p.deadline - (reminder_hour * INTERVAL '1 hour')
+                    OR p.last_notification_sent <
+                        p.deadline - (rh * INTERVAL '1 hour')
                 )
+                -- Дополнительно проверяем, что интервал rh актуален
+                AND p.deadline - (rh * INTERVAL '1 hour') >= NOW()
             ORDER BY p.deadline
             """
             projects = await self.fetch(query)

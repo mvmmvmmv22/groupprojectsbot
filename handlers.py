@@ -125,33 +125,33 @@ async def my_projects(message: types.Message, state: FSMContext):
                 text,
                 reply_markup=get_project_actions_kb(p['id'])
             )
-            await state.update_data({f"project_msg_{p['id']}": sent_msg.message_id})
-
+            await state.update_data({
+                f"project_msg_{p['id']}": sent_msg.message_id,
+                f"project_title_{p['id']}": p['title']
+            })
 
         logger.info(f"От пользователя с ID:{message.from_user.id} обработана команда \"Мои проекты\"")
 
-
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"Ошибка в my_projects: {e}")
         await message.answer("Произошла ошибка. Попробуйте снова.")
         await state.clear()
 
 
+
 # Обработка удаления проекта (инлайн-клавиатура "действия с проектом")
 @router.callback_query(F.data.startswith("delete_project_"))
-async def confirm_delete_project(callback: types.CallbackQuery, state: FSMContext):
+async def delete_project(callback: types.CallbackQuery, state: FSMContext):
     try:
-        db = router.db
         project_id = int(callback.data.split("_")[-1])
+        await state.update_data(project_id=project_id)
 
         await callback.message.answer(
             f"Вы уверены, что хотите удалить проект №{project_id}?",
             reply_markup=get_confirm_deletion_kb(project_id)
         )
-        await state.update_data(project_id=project_id)
         await state.set_state(DeleteProject.confirm)
-
-        logger.info(f"От пользователя с ID:{callback.from_user.id} обработана команда \"Начать удаление проекта\"")
+        logger.info(f"Пользователь {callback.from_user.id} начал удаление проекта {project_id}")
 
 
     except Exception as e:
@@ -160,50 +160,54 @@ async def confirm_delete_project(callback: types.CallbackQuery, state: FSMContex
         await state.clear()
 
 
+
 # Обработка подтверждения удаления проекта (по состоянию FSM)
 @router.callback_query(F.data.startswith("confirm_delete_"))
-async def delete_project(callback: types.CallbackQuery, state: FSMContext):
+async def confirm_delete_project(callback: types.CallbackQuery, state: FSMContext):
     try:
-        db = router.db
         data = await state.get_data()
         project_id = data.get("project_id")
-
 
         if not project_id:
             await callback.answer("Ошибка: проект не найден.")
             return
 
+        db = router.db
         success = await db.delete_project(project_id, callback.from_user.id)
+
+        chat_id = callback.message.chat.id
 
         if success:
             msg_id = data.get(f"project_msg_{project_id}")
-            chat_id = callback.message.chat.id
             if msg_id:
                 try:
                     await callback.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-                except:
-                    pass
+                    logger.info(f"Сообщение о проекте {project_id} удалено (message_id={msg_id})")
+                except Exception as e:
+                    logger.error(f"Не удалось удалить сообщение {msg_id}: {e}")
             try:
-                await callback.bot.delete_message(
-                    chat_id=chat_id,
-                    message_id=callback.message.message_id
-                )
-            except:
-                pass
+                await callback.bot.delete_message(chat_id=chat_id, message_id=callback.message.message_id)
+            except Exception as e:
+                logger.error(f"Не удалось удалить подтверждение: {e}")
+
 
             await callback.answer("Проект удалён ✅")
         else:
             await callback.message.answer("Ошибка: у вас нет прав на удаление этого проекта.")
+        await state.update_data({
+            f"project_msg_{project_id}": None,
+            f"project_title_{project_id}": None
+        })
+        await state.clear()  # Или state.reset_state()
 
-
-        await state.clear()
-        logger.info(f"От пользователя с ID:{callback.from_user.id} обработана команда \"Подтвердить удаление проекта\"")
+        logger.info(f"Проект {project_id} удалён пользователем {callback.from_user.id}")
 
 
     except Exception as e:
         logger.error(f"Ошибка: {e}")
         await callback.message.answer("Произошла ошибка. Попробуйте снова.")
         await state.clear()
+
 
 
 # Обработка отмены удаления проекта (по состоянию FSM)
@@ -273,11 +277,12 @@ async def process_deadline_input(message: Message, state: FSMContext):
 
         if success:
             msg_id = data.get(f"project_msg_{project_id}")
+            project_title = data.get(f"project_title_{project_id}", "Неизвестно")
             chat_id = message.chat.id
 
             if msg_id:
                 new_text = (
-                    f"Проект №{project_id}: {data.get('project_title', 'Неизвестно')}\n"
+                    f"Проект №{project_id}: {project_title}\n"
                     f"Дедлайн: {deadline.strftime('%d.%m.%Y %H:%M')}"
                 )
                 try:
@@ -287,20 +292,21 @@ async def process_deadline_input(message: Message, state: FSMContext):
                         text=new_text,
                         reply_markup=get_project_actions_kb(project_id)
                     )
-                except:
-                    pass
+                    logger.info(f"Дедлайн проекта {project_id} обновлён")
+                except Exception as e:
+                    logger.error(f"Не удалось обновить сообщение {msg_id}: {e}")
 
             await message.answer(
                 f"Дедлайн успешно установлен:\n<b>{deadline.strftime('%d.%m.%Y %H:%M')}</b>",
                 parse_mode="HTML"
             )
-            logger.info(f"Дедлайн для проекта с ID:{project_id} обновлён пользователем с ID:{creator_id}")
         else:
-            await message.answer("Ошибка: у вас нет прав на установку дедлайна для этого проекта")
+            await message.answer("Ошибка: у вас нет прав на установку дедлайна для этого проекта.")
 
         await state.clear()
 
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"Ошибка в process_deadline_input: {e}")
         await message.answer("Произошла ошибка. Попробуйте снова.")
         await state.clear()
+

@@ -3,6 +3,7 @@ from datetime import datetime
 import os
 import logging
 
+logging.getLogger('asyncpg').setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class Database:
@@ -39,17 +40,17 @@ class Database:
 
     async def get_user_projects(self, user_id: int):
         try:
+            logger.info(f"Пользователь с ID:{user_id} получил список проектов")
             return await self.fetch(
                 """
-                SELECT p.id, p.title, p.deadline
-                FROM projects p
-                JOIN project_members pm ON p.id = pm.project_id
-                WHERE pm.user_id = $1
-                ORDER BY p.created_at DESC
+                SELECT id, title, deadline
+                FROM projects
+                WHERE creator_id = $1
+                ORDER BY created_at DESC
                 """,
                 user_id
             )
-            logger.info(f"Пользователь с ID:{user_id} получил список проектов")
+
         except Exception as e:
             logger.error(f"Ошибка: {e}")
             raise

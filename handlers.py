@@ -46,7 +46,7 @@ async def cmd_start(message: types.Message):
             "Добро пожаловать! Давайте управлять проектами.",
             reply_markup=get_main_kb()
         )
-        logger.info(f"От пользователя с ID:{user_id} обработана команда /start")
+        logger.info(f"От пользователя с ID:{message.from_user.id} обработана команда /start")
     except Exception as e:
             logger.error(f"Ошибка: {e}")
             raise
@@ -57,7 +57,9 @@ async def create_project_start(message: types.Message, state: FSMContext):
     try:
         await message.answer("Введите название проекта:", reply_markup=get_cancel_kb())
         await state.set_state(CreateProject.enter_title)
-        logger.info(f"От пользователя с ID:{user_id} обработана команда \"Создать проект\" с клавиатуры")
+
+        logger.info(f"От пользователя с ID:{message.from_user.id} обработана команда \"Создать проект\"")
+
     except Exception as e:
             logger.error(f"Ошибка: {e}")
             raise
@@ -89,7 +91,9 @@ async def create_project_finish(message: types.Message, state: FSMContext):
         await db.create_project(title, message.from_user.id)
         await message.answer(f"Проект \"{title}\" создан! ✅", reply_markup=get_main_kb())
         await state.clear()
-        logger.info(f"От пользователя с ID:{user_id} обработана команда \"\"")
+
+        logger.info(f"От пользователя с ID:{message.from_user.id} обработана команда \"Закончить создание проекта\"")
+
     except Exception as e:
             logger.error(f"Ошибка: {e}")
             raise
@@ -97,66 +101,95 @@ async def create_project_finish(message: types.Message, state: FSMContext):
 
 @router.message(F.text == "Мои проекты")
 async def my_projects(message: types.Message):
-    db = router.db
-    projects = await db.get_user_projects(message.from_user.id)
+    try:
+        db = router.db
+        projects = await db.get_user_projects(message.from_user.id)
 
-    if not projects:
-        await message.answer("У вас нет проектов.")
-        return
+        if not projects:
+            await message.answer("У вас нет проектов.")
+            logger.info(f"От пользователя с ID:{message.from_user.id} обработана команда \"Мои проекты \"")
+            return
 
-    for p in projects:
-        text = f"Проект №{p['id']}: {p['title']}\n"
-        if p['deadline']:
-            text += f"Дедлайн: {p['deadline'].strftime('%d.%m.%Y %H:%M')}\n"
-        else:
-            text += "Дедлайн не установлен\n"
+        for p in projects:
+            text = f"Проект №{p['id']}: {p['title']}\n"
+            if p['deadline']:
+                text += f"Дедлайн: {p['deadline'].strftime('%d.%m.%Y %H:%M')}\n"
+            else:
+                text += "Дедлайн не установлен\n"
 
-        await message.answer(
-            text,
-            reply_markup=get_project_actions_kb(p['id'])
-        )
+            await message.answer(
+                text,
+                reply_markup=get_project_actions_kb(p['id'])
+            )
+
+        logger.info(f"От пользователя с ID:{message.from_user.id} обработана команда \"Мои проекты \"")
+
+    except Exception as e:
+            logger.error(f"Ошибка: {e}")
+            raise
 
 
 
 # Обработчик удаления проекта
 @router.callback_query(F.data.startswith("delete_project_"))
 async def confirm_delete_project(callback: types.CallbackQuery, state: FSMContext):
-    db = router.db
-    project_id = int(callback.data.split("_")[-1])
+    try:
+        db = router.db
+        project_id = int(callback.data.split("_")[-1])
 
-    await callback.message.answer(
-        f"Вы уверены, что хотите удалить проект №{project_id}?",
-        reply_markup=get_confirm_deletion_kb(project_id)
-    )
-    await state.update_data(project_id=project_id)
-    await state.set_state(DeleteProject.confirm)
+        await callback.message.answer(
+            f"Вы уверены, что хотите удалить проект №{project_id}?",
+            reply_markup=get_confirm_deletion_kb(project_id)
+        )
+        await state.update_data(project_id=project_id)
+        await state.set_state(DeleteProject.confirm)
+
+        logger.info(f"От пользователя с ID:{callback.from_user.id} обработана команда \"Начать удаление проекта\"")
+
+    except Exception as e:
+            logger.error(f"Ошибка: {e}")
+            raise
 
 
 
 
 @router.callback_query(F.data.startswith("confirm_delete_"))
 async def delete_project(callback: types.CallbackQuery, state: FSMContext):
-    db = router.db
-    data = await state.get_data()
-    project_id = data.get("project_id")
+    try:
+        db = router.db
+        data = await state.get_data()
+        project_id = data.get("project_id")
 
-    if not project_id:
-        await callback.answer("Ошибка: проект не найден.")
-        return
+        if not project_id:
+            await callback.answer("Ошибка: проект не найден.")
+            return
 
-    success = await db.delete_project(project_id, callback.from_user.id)
+        success = await db.delete_project(project_id, callback.from_user.id)
 
-    if success:
-        await callback.message.answer(f"Проект №{project_id} удалён ✅")
-    else:
-        await callback.message.answer("Ошибка: у вас нет прав на удаление этого проекта.")
+        if success:
+            await callback.message.answer(f"Проект №{project_id} удалён ✅")
+        else:
+            await callback.message.answer("Ошибка: у вас нет прав на удаление этого проекта.")
 
+        await state.clear()
 
-    await state.clear()
+        logger.info(f"От пользователя с ID:{callback.from_user.id} обработана команда \"Подтвердить удаление проекта\"")
+
+    except Exception as e:
+            logger.error(f"Ошибка: {e}")
+            raise
 
 
 
 @router.callback_query(F.data == "cancel_deletion")
 async def cancel_deletion(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Удаление отменено.")
-    await state.clear()
+    try:
+        await callback.message.answer("Удаление отменено.")
+
+        await state.clear()
+
+        logger.info(f"От пользователя с ID:{callback.from_user.id} обработана команда \"Отменить удаление проекта\"")
+
+    except Exception as e:
+            logger.error(f"Ошибка: {e}")
+            raise

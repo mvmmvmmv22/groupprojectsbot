@@ -3,7 +3,6 @@ from datetime import datetime
 import os
 import logging
 
-logging.getLogger('asyncpg').setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class Database:
@@ -35,8 +34,6 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка: {e}")
             raise
-
-
 
     async def get_user_projects(self, user_id: int):
         try:
@@ -122,7 +119,6 @@ class Database:
             logger.error(f"Ошибка: {e}")
             raise
 
-
     async def get_notification_settings(self, user_id: int) -> dict | None:
         try:
             result = await self.fetch(
@@ -130,7 +126,7 @@ class Database:
                 user_id
             )
             if result:
-                row = result[0]  # Берём первую запись
+                row = result[0]
                 return {
                     "enable_reminders": row["enable_reminders"],
                     "reminder_hours": row["reminder_hours"]
@@ -140,7 +136,6 @@ class Database:
             logger.error("Ошибка получения настроек user_id=%d: %s", user_id, e)
             return None
 
-
     async def update_notification_settings(
         self,
         user_id: int,
@@ -148,14 +143,12 @@ class Database:
         reminder_hours: list[int] | None = None
     ):
         try:
-            # Валидация входных данных
             if reminder_hours is not None:
                 if not reminder_hours:
                     raise ValueError("Список интервалов не может быть пустым")
                 if not all(isinstance(h, int) and h > 0 for h in reminder_hours):
                     raise ValueError("Все интервалы должны быть положительными целыми числами")
 
-            # Формируем запрос
             query = """
                 INSERT INTO notifications_settings (user_id, enable_reminders, reminder_hours)
                 VALUES ($1, $2, $3)
@@ -171,7 +164,6 @@ class Database:
                     END
             """
 
-            # Выполняем запрос
             await self.execute(query, user_id, enable_reminders, reminder_hours)
 
             logger.info("Настройки сохранены для user_id=%d: enable=%s, hours=%s",
@@ -179,8 +171,7 @@ class Database:
 
         except Exception as e:
             logger.error("Ошибка сохранения настроек user_id=%d: %s", user_id, e)
-            raise  # Перебрасываем исключение для обработки в хендлере
-
+            raise
 
     async def get_projects_near_deadline(self) -> list[dict]:
         try:

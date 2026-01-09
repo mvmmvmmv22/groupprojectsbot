@@ -6,8 +6,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 import os
 from db import Database
-from handlers import router
-from logger import *
+from handlers_commands import *
+from handlers_actions import router
+import logger
 
 logging.basicConfig(
     level=logging.INFO,

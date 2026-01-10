@@ -243,3 +243,43 @@ async def save_reminder_settings(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Ошибка в обработчике кнопок настроек(сохранение интервалов): {e}")
         await callback.message.answer("Произошла ошибка. Попробуйте снова.")
         await state.clear()
+
+
+# Обработка обновления интервалов
+@router.callback_query(F.data.startswith("reminder_toggle_"))
+async def toggle_reminder_hour(callback: CallbackQuery, state: FSMContext):
+    try:
+        user_id = callback.from_user.id
+        hour = int(callback.data.split("_")[-1])
+        db = router.db
+        settings = await db.get_notification_settings(user_id)
+        hours = settings["reminder_hours"] if settings else []
+        if hour in hours:
+            hours.remove(hour)
+        else:
+            hours.append(hour)
+        await db.update_notification_settings(
+            user_id=user_id,
+            enable_reminders=True,
+            reminder_hours=hours
+        )
+
+        await callback.answer(f"Интервалы обновлены: {hours}")
+        await select_reminder_intervals(callback.message, state)
+
+    except Exception as e:
+        logger.error(f"Ошибка в обработчике обновления интервалов: {e}")
+        await callback.message.answer("Произошла ошибка. Попробуйте снова.")
+        await state.clear()
+
+
+# Сохранение настроек уведомлений
+@router.callback_query(F.data == "reminder_save")
+async def save_reminder_settings(callback: CallbackQuery, state: FSMContext):
+    try:
+        await callback.answer("Настройки сохранены!")
+        await show_notifications(callback.message, state)
+    except Exception as e:
+        logger.error(f"Ошибка в обработчике кнопок настроек(сохранение интервалов): {e}")
+        await callback.message.answer("Произошла ошибка. Попробуйте позже.")
+        await state.clear()

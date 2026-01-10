@@ -6,3 +6,4 @@ __pycache__/
 *.log
 *.kate-swp
 *.dontneed
+unikey_cipher.py

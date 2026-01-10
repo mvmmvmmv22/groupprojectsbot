@@ -111,3 +111,18 @@ def get_notification_settings_kb():
         ]
     ])
 
+def get_confirmadding_kb(user_id: int, project_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="Разрешить",
+                callback_data=f"accept_addto_{user_id}_{project_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="Запретить",
+                callback_data=f"deny_addto_{user_id}_{project_id}"
+            )
+        ]
+    ])

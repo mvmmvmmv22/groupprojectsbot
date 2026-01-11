@@ -1,6 +1,6 @@
 from db import Database
 from unikey_cipher import unikey_cipher
-from keyboards import get_main_kb, get_confirmadding_kb, get_project_actions_kb
+from keyboards import get_main_kb, get_confirm_kb, get_confirmadding_kb, get_project_actions_kb
 from bot import bot
 import os
 from dotenv import load_dotenv
@@ -232,12 +232,11 @@ async def process_userid_foradd_input(message: Message, state: FSMContext):
             return
         sucess = await db.user_exists(target_id)
         if sucess:
-            project_title = data.get(f"project_title_{project_id}", "Неизвестно")
-            await bot.send_message(chat_id=user_id, text=f"Вас хотят добавить в проект {project_title}(пользователь с id {user_id})", reply_markup=get_confirmadding_kb(user_id, project_id))
+            project_title = data.get(f"project_title_{project_id}")
+            await bot.send_message(chat_id=target_id, text=f"Вас хотят добавить в проект \"{project_title}\"(пользователь с id {user_id})", reply_markup=get_confirmadding_kb(user_id, project_id))
+            await bot.send_message(chat_id=user_id, text="Ожидание подтверждения")
             unikey = await unikey_cipher(project_id, user_id, target_id)
-            await state.update_data(project_id=project_id)
-            await state.update_data(user_id=user_id)
-            await state.update_data(target_id=target_id)
+            await state.update_data({"project_id": project_id, "user_id": user_id, "target_id": target_id})
             await db.set_unikey(unikey, True, False)
         else:
             await message.answer("Ошибка: добавляемый пользователь не запустил бота")
@@ -254,13 +253,23 @@ async def process_userid_foradd_input(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("accept_addto_"))
 async def accept_adding_query(callback: CallbackQuery, state: FSMContext):
     try:
+        command = callback.data
+        logger.info(f"Получена команда {command}")
+        target_id = callback.from_user.id
         db = router.db
-        uapid = callback.data.split("_")[-1]
-        unikey = await unikey_cipher(uapid[0], uapid[1], callback.chat.id)
-        sucess = await db.check_unikey(unikey)
+        parts = command.split('_')
+        uapid = [int(part) for part in parts if part.isdigit()]
+        unikey = await unikey_cipher(uapid[1], uapid[0], target_id)
+        logger.info(f"Сгенерирован проверочный unikey: {unikey} с параметрами project_id: {uapid[1]}; user_id: {uapid[0]}; target_id: {target_id}")
+        sucess = await db.unikey_isactive(unikey)
         if sucess:
+            await state.update_data({"project_id": uapid[1], "user_id": uapid[0], "target_id": target_id})
             await state.set_state(AddMember.answer_collected)
-            db.set_unikey(unikey, False, True)
+            await db.set_unikey(unikey, True, True)
+            logger.info(f"Приглашение (unikey: {unikey}) принято")
+            await bot.send_message(chat_id=target_id, text=f"Нажмите \"Готово\" для подтверждения принятия приглашения", reply_markup=get_confirm_kb())
+        else:
+            await callback.message.answer("У вас нет прав")
 
     except Exception as e:
         logger.error(f"Ошибка в обработчике принятия запроса на добавление: {e}")
@@ -272,13 +281,23 @@ async def accept_adding_query(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("deny_addto_"))
 async def deny_adding_query(callback: CallbackQuery, state: FSMContext):
     try:
+        command = callback.data
+        logger.info(f"Получена команда {command}")
+        target_id = callback.from_user.id
         db = router.db
-        uapid = callback.data.split("_")[-1]
-        unikey = await unikey_cipher(uapid[0], uapid[1], callback.chat.id)
-        sucess = await db.check_unikey(unikey)
+        parts = command.split('_')
+        uapid = [int(part) for part in parts if part.isdigit()]
+        unikey = await unikey_cipher(uapid[1], uapid[0], target_id)
+        logger.info(f"Сгенерирован проверочный unikey: {unikey} с параметрами project_id: {uapid[1]}; user_id: {uapid[0]}; target_id: {target_id}")
+        sucess = await db.unikey_isactive(unikey)
         if sucess:
+            await state.update_data({"project_id": uapid[1], "user_id": uapid[0], "target_id": target_id})
             await state.set_state(AddMember.answer_collected)
-            await db.set_unikey(unikey, False, False)
+            await db.set_unikey(unikey, True, False)
+            logger.info(f"Приглашение (unikey: {unikey}) отклонено")
+            await bot.send_message(chat_id=target_id, text=f"Нажмите \"Готово\" для подтверждения отклонения приглашения", reply_markup=get_confirm_kb())
+        else:
+            await callback.message.answer("У вас нет прав")
 
     except Exception as e:
         logger.error(f"Ошибка в обработчике отклонения запроса на добавление: {e}")
@@ -294,22 +313,27 @@ async def add_toproject(message: Message, state: FSMContext):
         project_id = data.get("project_id")
         user_id = data.get("user_id")
         target_id = data.get("target_id")
+        logger.debug(f"Данные из state: project_id={project_id}, user_id={user_id}, target_id={target_id}")
         unikey = await unikey_cipher(project_id, user_id, target_id)
         sucess = await db.check_unikey(unikey)
 
         if sucess:
             await db.add_member(project_id, target_id, user_id)
-            bot.send_message(chat_id=user_id, text=f"Приглашенный пользователь с ID:{target_id} принял запрос на добавление в проект с ID:{project_id}")
-            bot.send_message(chat_id=target_id, text=f"Вы успешно добавлены в проект с ID:{project_id} создателем проекта с ID:{user_id}")
+            await bot.send_message(chat_id=user_id, text=f"Приглашенный пользователь с ID:{target_id} принял запрос на добавление в проект с ID:{project_id}")
+            await bot.send_message(chat_id=target_id, text=f"Вы успешно добавлены в проект с ID:{project_id} создателем проекта с ID:{user_id}")
+            await db.set_unikey(unikey, False, True)
         else:
-            bot.send_message(chat_id=user_id, text=f"Приглашенный пользователь с ID:{target_id} отклонил запрос на добавление в проект с ID:{project_id}")
-            bot.send_message(chat_id=target_id, text=f"Вы успешно отказались от добавления в проект с ID:{project_id} создателем проекта с ID:{user_id}")
+            await bot.send_message(chat_id=user_id, text=f"Приглашенный пользователь с ID:{target_id} отклонил запрос на добавление в проект с ID:{project_id}")
+            await bot.send_message(chat_id=target_id, text=f"Вы успешно отказались от добавления в проект с ID:{project_id} создателем проекта с ID:{user_id}")
+            await db.set_unikey(unikey, False, False)
+
+        logger.info(f"Ответ на приглашение(unikey: {unikey}) обработан")
 
         await state.clear()
 
     except Exception as e:
         logger.error(f"Ошибка в обработчике ответа на запрос добавления: {e}")
-        await message.send("Произошла ошибка. Попробуйте позже.")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
         await state.clear()
 
 

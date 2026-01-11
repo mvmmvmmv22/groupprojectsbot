@@ -126,3 +126,7 @@ def get_confirmadding_kb(user_id: int, project_id: int) -> InlineKeyboardMarkup:
             )
         ]
     ])
+
+def get_confirm_kb() -> ReplyKeyboardMarkup:
+    buttons = [[KeyboardButton(text="Готово")]]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)

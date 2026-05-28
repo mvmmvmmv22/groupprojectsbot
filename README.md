@@ -1,2 +1,2 @@
 # groupprojectsbot
-all code at vvolynka/groupprojectsbot
+all code at github.com/vvolynka/groupprojectsbot
